@@ -1,0 +1,1444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Her Handbook</title>
+  <meta name="description" content="Her Handbook private cycle, playbook, and journal app." />
+  <style>
+    html, body { min-height: 100%; background: #FAF3E0; }
+    body { margin: 0; }
+    #root { min-height: 100vh; }
+    .noscript { padding: 24px; font-family: system-ui, sans-serif; color: #3B2A2A; }
+  </style>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <noscript><div class="noscript">Please enable JavaScript to use Her Handbook.</div></noscript>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="env,react">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ─── BRAND TOKENS ───────────────────────────────────────────────────────────
+const COLORS = {
+  rose: "#C9847A",
+  cream: "#FAF3E0",
+  terra: "#D4845A",
+  sage: "#8FAF8F",
+  brown: "#3B2A2A",
+  darkBg: "#1E1614",
+  darkCard: "#2A1F1C",
+  darkText: "#FAF3E0",
+  amber: "#D4A055",
+  lavender: "#C4AEBF",
+};
+
+const PHASES = [
+  { name: "Menstrual", range: [1, 5], color: "#C9847A", emoji: "🌑", desc: "She may need extra gentleness and comfort. Check her playbook." },
+  { name: "Follicular", range: [6, 13], color: "#8FAF8F", emoji: "🌒", desc: "Energy is usually rising. A good time to plan something together." },
+  { name: "Ovulatory", range: [14, 16], color: "#D4845A", emoji: "🌕", desc: "She's likely feeling her best. She may be more social and energetic." },
+  { name: "Luteal", range: [17, 28], color: "#C4AEBF", emoji: "🌖", desc: "She may need more emotional support as her period approaches." },
+];
+
+const MOOD_TAGS = ["Irritable","Tired","Sad","Anxious","Clingy","Needs Space","Happy","Normal"];
+const MOOD_COLORS = {
+  "Irritable":"#C9847A","Tired":"#8FAF8F","Sad":"#6B8EB0","Anxious":"#C4AEBF",
+  "Clingy":"#D4845A","Needs Space":"#A09080","Happy":"#8FAF8F","Normal":"#3B2A2A"
+};
+
+// ─── STORAGE HELPERS ────────────────────────────────────────────────────────
+const load = (key, fallback) => {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch { return fallback; }
+};
+const save = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} };
+
+// ─── CYCLE MATH ─────────────────────────────────────────────────────────────
+const getCycleDay = (lastStart, cycleLen = 28) => {
+  if (!lastStart) return null;
+  const start = new Date(lastStart);
+  const today = new Date();
+  start.setHours(0,0,0,0); today.setHours(0,0,0,0);
+  const diff = Math.floor((today - start) / 86400000) + 1;
+  return ((diff - 1) % cycleLen) + 1;
+};
+const getPhase = (cycleDay, cycleLen = 28) => {
+  if (!cycleDay) return null;
+  const adjusted = Math.round((cycleDay / cycleLen) * 28);
+  return PHASES.find(p => adjusted >= p.range[0] && adjusted <= p.range[1]) || PHASES[3];
+};
+const getDaysUntilPeriod = (lastStart, cycleLen = 28) => {
+  if (!lastStart) return null;
+  const start = new Date(lastStart);
+  start.setHours(0,0,0,0);
+  const nextPeriod = new Date(start.getTime() + cycleLen * 86400000);
+  const today = new Date(); today.setHours(0,0,0,0);
+  return Math.ceil((nextPeriod - today) / 86400000);
+};
+
+// ─── FONT LOADER ────────────────────────────────────────────────────────────
+const FontLoader = () => (
+  <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=DM+Sans:wght@300;400;500;600&display=swap');
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #FAF3E0; }
+    :root {
+      --rose: #C9847A; --cream: #FAF3E0; --terra: #D4845A;
+      --sage: #8FAF8F; --brown: #3B2A2A; --dark-bg: #1E1614;
+      --dark-card: #2A1F1C; --amber: #D4A055; --lavender: #C4AEBF;
+    }
+    .hh-app { font-family: 'DM Sans', sans-serif; }
+    .hh-serif { font-family: 'Cormorant Garamond', serif; }
+    .fade-in { animation: fadeIn 0.4s ease; }
+    .slide-up { animation: slideUp 0.35s cubic-bezier(.16,1,.3,1); }
+    @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+    @keyframes slideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.6;} }
+    @keyframes shake { 0%,100%{transform:translateX(0);} 25%{transform:translateX(-8px);} 75%{transform:translateX(8px);} }
+    @keyframes checkmark { 0%{transform:scale(0);} 60%{transform:scale(1.3);} 100%{transform:scale(1);} }
+    .pulse { animation: pulse 2s ease-in-out infinite; }
+    .shake { animation: shake 0.4s ease; }
+    .check-pop { animation: checkmark 0.4s cubic-bezier(.16,1,.3,1) forwards; }
+    input, textarea, select {
+      font-family: 'DM Sans', sans-serif;
+      outline: none;
+      border: none;
+      background: transparent;
+      width: 100%;
+      resize: none;
+    }
+    input::placeholder, textarea::placeholder { opacity: 0.45; }
+    ::-webkit-scrollbar { width: 0; }
+    .tab-scroll::-webkit-scrollbar { height: 0; }
+  `}</style>
+);
+
+// ─── MAIN APP ───────────────────────────────────────────────────────────────
+function HerHandbook() {
+  const [dark, setDark] = useState(() => load("hh-dark", false));
+  const [onboarded, setOnboarded] = useState(() => load("hh-onboarded", false));
+  const [pin, setPin] = useState(() => load("hh-pin", null));
+  const [locked, setLocked] = useState(false);
+  const [activeTab, setActiveTab] = useState("home");
+
+  // Core data
+  const [settings, setSettings] = useState(() => load("hh-settings", {
+    name: "",
+    cycleLen: 28,
+    periodLen: 5,
+    lastStart: "",
+  }));
+  const [playbook, setPlaybook] = useState(() => load("hh-playbook", {}));
+  const [journal, setJournal] = useState(() => load("hh-journal", []));
+  const [cycleLogs, setCycleLogs] = useState(() => load("hh-cycles", []));
+
+  // Persist
+  useEffect(() => { save("hh-dark", dark); }, [dark]);
+  useEffect(() => { save("hh-settings", settings); }, [settings]);
+  useEffect(() => { save("hh-playbook", playbook); }, [playbook]);
+  useEffect(() => { save("hh-journal", journal); }, [journal]);
+  useEffect(() => { save("hh-cycles", cycleLogs); }, [cycleLogs]);
+
+  const bg = dark ? COLORS.darkBg : COLORS.cream;
+  const cardBg = dark ? COLORS.darkCard : "#fff";
+  const text = dark ? COLORS.darkText : COLORS.brown;
+  const subtext = dark ? "#C4A898" : "#8B6B6B";
+  const border = dark ? "#3D2A26" : "#EDD8C8";
+
+  const theme = { dark, bg, cardBg, text, subtext, border };
+
+  const updateSettings = (patch) => setSettings(s => ({ ...s, ...patch }));
+  const updatePlaybook = (key, val) => setPlaybook(p => ({ ...p, [key]: val }));
+
+  if (!onboarded) {
+    return (
+      <div className="hh-app" style={{ background: bg, minHeight: "100vh" }}>
+        <FontLoader />
+        <Onboarding
+          theme={theme}
+          onComplete={(data, pinCode) => {
+            updateSettings(data);
+            if (pinCode) { setPin(pinCode); save("hh-pin", pinCode); }
+            setOnboarded(true);
+            save("hh-onboarded", true);
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (locked && pin) {
+    return (
+      <div className="hh-app" style={{ background: bg, minHeight: "100vh" }}>
+        <FontLoader />
+        <LockScreen theme={theme} pin={pin} onUnlock={() => setLocked(false)} />
+      </div>
+    );
+  }
+
+  const cycleDay = getCycleDay(settings.lastStart, settings.cycleLen);
+  const phase = getPhase(cycleDay, settings.cycleLen);
+  const daysUntil = getDaysUntilPeriod(settings.lastStart, settings.cycleLen);
+
+  const screens = {
+    home: <HomeScreen theme={theme} settings={settings} cycleDay={cycleDay} phase={phase} daysUntil={daysUntil} cycleLogs={cycleLogs} />,
+    calendar: <CalendarScreen theme={theme} settings={settings} cycleLogs={cycleLogs} journal={journal} />,
+    playbook: <PlaybookScreen theme={theme} playbook={playbook} updatePlaybook={updatePlaybook} />,
+    journal: <JournalScreen theme={theme} journal={journal} setJournal={setJournal} cycleDay={cycleDay} phase={phase} />,
+    settings: <SettingsScreen theme={theme} settings={settings} updateSettings={updateSettings} dark={dark} setDark={setDark} pin={pin} setPin={setPin} cycleLogs={cycleLogs} setCycleLogs={setCycleLogs} />,
+  };
+
+  return (
+    <div className="hh-app" style={{ background: bg, minHeight: "100vh", maxWidth: 430, margin: "0 auto", position: "relative", display: "flex", flexDirection: "column" }}>
+      <FontLoader />
+      <div style={{ flex: 1, overflowY: "auto", paddingBottom: 72 }}>
+        <div key={activeTab} className="fade-in">
+          {screens[activeTab]}
+        </div>
+      </div>
+      <BottomNav active={activeTab} setActive={setActiveTab} theme={theme} />
+    </div>
+  );
+}
+
+// ─── BOTTOM NAV ─────────────────────────────────────────────────────────────
+function BottomNav({ active, setActive, theme }) {
+  const tabs = [
+    { id: "home", label: "Home", icon: HomeIcon },
+    { id: "calendar", label: "Calendar", icon: CalIcon },
+    { id: "playbook", label: "Playbook", icon: BookIcon },
+    { id: "journal", label: "Journal", icon: PenIcon },
+    { id: "settings", label: "Settings", icon: GearIcon },
+  ];
+  return (
+    <div style={{
+      position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)",
+      width: "100%", maxWidth: 430, background: theme.dark ? COLORS.darkCard : "#fff",
+      borderTop: `1px solid ${theme.border}`, display: "flex",
+      padding: "8px 0 12px", zIndex: 100,
+      boxShadow: "0 -4px 20px rgba(0,0,0,0.06)"
+    }}>
+      {tabs.map(t => {
+        const isActive = active === t.id;
+        return (
+          <button key={t.id} onClick={() => setActive(t.id)}
+            style={{ flex: 1, background: "none", border: "none", cursor: "pointer",
+              display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+              color: isActive ? COLORS.rose : theme.subtext,
+              transition: "color 0.2s", padding: "4px 0" }}>
+            <t.icon size={22} active={isActive} />
+            <span style={{ fontSize: 10, fontFamily: "'DM Sans',sans-serif", fontWeight: isActive ? 600 : 400, letterSpacing: 0.3 }}>
+              {t.label}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── HOME SCREEN ─────────────────────────────────────────────────────────────
+function HomeScreen({ theme, settings, cycleDay, phase, daysUntil, cycleLogs }) {
+  const isLate = daysUntil !== null && daysUntil < 0;
+  const lateDays = isLate ? Math.abs(daysUntil) : 0;
+
+  const avgLate = cycleLogs.length
+    ? Math.round(cycleLogs.filter(c => c.daysLate > 0).reduce((a, c) => a + c.daysLate, 0) / cycleLogs.filter(c => c.daysLate > 0).length || 0)
+    : 0;
+
+  return (
+    <div style={{ padding: "0 0 8px" }}>
+      {/* Header */}
+      <div style={{
+        background: `linear-gradient(135deg, ${COLORS.rose}22 0%, ${COLORS.terra}15 100%)`,
+        padding: "52px 24px 28px",
+        borderBottom: `1px solid ${theme.border}`,
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <p style={{ color: theme.subtext, fontSize: 12, letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 4 }}>
+              Her Handbook
+            </p>
+            <h1 className="hh-serif" style={{ color: theme.text, fontSize: 32, fontWeight: 500, lineHeight: 1.1 }}>
+              {settings.name ? `${settings.name}'s\nJournal` : "Good to\nhave you."}
+            </h1>
+          </div>
+          {phase && (
+            <div style={{
+              background: `${phase.color}20`,
+              border: `1.5px solid ${phase.color}50`,
+              borderRadius: 16, padding: "8px 14px", textAlign: "center"
+            }}>
+              <div style={{ fontSize: 22 }}>{phase.emoji}</div>
+              <div style={{ color: phase.color, fontSize: 10, fontWeight: 600, letterSpacing: 0.5, marginTop: 2 }}>
+                {phase.name}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{ padding: "20px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* Late Alert */}
+        {isLate && (
+          <div className="pulse slide-up" style={{
+            background: `${COLORS.amber}18`,
+            border: `1.5px solid ${COLORS.amber}60`,
+            borderRadius: 16, padding: "16px 18px"
+          }}>
+            <p style={{ color: COLORS.amber, fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+              ⏳ She's {lateDays} day{lateDays !== 1 ? "s" : ""} late
+            </p>
+            <p style={{ color: theme.subtext, fontSize: 13, lineHeight: 1.5 }}>
+              {avgLate > 0 ? `She's been late before — average ${avgLate} days. ` : ""}
+              Check her playbook and stay calm. Her pattern is your guide.
+            </p>
+          </div>
+        )}
+
+        {/* Cycle Day Card */}
+        {cycleDay && (
+          <div className="slide-up" style={{
+            background: theme.cardBg, borderRadius: 20, padding: "20px 20px",
+            border: `1px solid ${theme.border}`,
+            boxShadow: "0 2px 16px rgba(0,0,0,0.04)"
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <span style={{ color: theme.subtext, fontSize: 12, letterSpacing: 1, textTransform: "uppercase" }}>Cycle Status</span>
+              <span style={{ color: COLORS.rose, fontSize: 12, fontWeight: 600 }}>Day {cycleDay}</span>
+            </div>
+            {/* Progress bar */}
+            <div style={{ background: theme.dark ? "#3D2A26" : "#F0E4D8", borderRadius: 8, height: 8, marginBottom: 14, overflow: "hidden" }}>
+              <div style={{
+                width: `${(cycleDay / (settings.cycleLen || 28)) * 100}%`,
+                height: "100%", background: `linear-gradient(90deg, ${COLORS.rose}, ${COLORS.terra})`,
+                borderRadius: 8, transition: "width 0.6s ease"
+              }} />
+            </div>
+            {phase && (
+              <>
+                <p style={{ color: theme.text, fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
+                  {phase.emoji} {phase.name} Phase
+                </p>
+                <p style={{ color: theme.subtext, fontSize: 13, lineHeight: 1.55 }}>{phase.desc}</p>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Countdown Card */}
+        {daysUntil !== null && !isLate && (
+          <div style={{
+            background: theme.cardBg, borderRadius: 20, padding: "18px 20px",
+            border: `1px solid ${theme.border}`,
+            boxShadow: "0 2px 16px rgba(0,0,0,0.04)",
+            display: "flex", alignItems: "center", justifyContent: "space-between"
+          }}>
+            <div>
+              <p style={{ color: theme.subtext, fontSize: 12, letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 }}>Next Period</p>
+              <p style={{ color: theme.text, fontSize: 18, fontWeight: 600 }}>
+                {daysUntil === 0 ? "Expected today" : `In ${daysUntil} day${daysUntil !== 1 ? "s" : ""}`}
+              </p>
+            </div>
+            <div style={{
+              width: 52, height: 52, borderRadius: "50%",
+              background: `linear-gradient(135deg, ${COLORS.rose}30, ${COLORS.terra}30)`,
+              border: `2px solid ${COLORS.rose}50`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 22
+            }}>🗓</div>
+          </div>
+        )}
+
+        {/* Quick reminder */}
+        <div style={{
+          background: `${COLORS.sage}20`,
+          border: `1px solid ${COLORS.sage}40`,
+          borderRadius: 16, padding: "16px 18px"
+        }}>
+          <p style={{ color: COLORS.sage, fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+            💚 Reminder
+          </p>
+          <p style={{ color: theme.subtext, fontSize: 13, lineHeight: 1.55 }}>
+            "The little things you notice become the patterns you'll understand."
+          </p>
+        </div>
+
+        {/* Setup prompt if no data */}
+        {!settings.lastStart && (
+          <div style={{
+            background: theme.cardBg, border: `1.5px dashed ${COLORS.rose}50`,
+            borderRadius: 20, padding: "20px", textAlign: "center"
+          }}>
+            <p style={{ color: COLORS.rose, fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Complete your setup</p>
+            <p style={{ color: theme.subtext, fontSize: 13 }}>Add her last period date in Settings to activate cycle tracking.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── CALENDAR SCREEN ─────────────────────────────────────────────────────────
+function CalendarScreen({ theme, settings, cycleLogs, journal }) {
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedDay, setSelectedDay] = useState(null);
+
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDay = new Date(year, month, 1).getDay();
+  const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+  const getDayColor = (day) => {
+    if (!settings.lastStart) return null;
+    const date = new Date(year, month, day);
+    date.setHours(0,0,0,0);
+    const lastStart = new Date(settings.lastStart);
+    lastStart.setHours(0,0,0,0);
+    const cycleLen = settings.cycleLen || 28;
+    const periodLen = settings.periodLen || 5;
+    const diff = Math.floor((date - lastStart) / 86400000);
+    const dayInCycle = ((diff % cycleLen) + cycleLen) % cycleLen + 1;
+
+    if (dayInCycle >= 1 && dayInCycle <= periodLen) return COLORS.rose;
+    if (dayInCycle >= cycleLen - 4) return COLORS.lavender;
+    if (dayInCycle >= 13 && dayInCycle <= 15) return COLORS.terra;
+    if (dayInCycle >= 7 && dayInCycle <= 13) return COLORS.sage;
+    return null;
+  };
+
+  const getJournalDot = (day) => {
+    const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+    return journal.some(e => e.date && e.date.startsWith(dateStr));
+  };
+
+  const selectedNotes = selectedDay ? journal.filter(e => {
+    const dateStr = `${year}-${String(month+1).padStart(2,"0")}-${String(selectedDay).padStart(2,"0")}`;
+    return e.date && e.date.startsWith(dateStr);
+  }) : [];
+
+  return (
+    <div style={{ padding: "52px 0 8px" }}>
+      <div style={{ padding: "0 20px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <button onClick={() => setCurrentDate(new Date(year, month - 1, 1))}
+          style={{ background: "none", border: "none", cursor: "pointer", color: theme.subtext, fontSize: 22 }}>‹</button>
+        <h2 className="hh-serif" style={{ color: theme.text, fontSize: 24, fontWeight: 500 }}>
+          {monthNames[month]} {year}
+        </h2>
+        <button onClick={() => setCurrentDate(new Date(year, month + 1, 1))}
+          style={{ background: "none", border: "none", cursor: "pointer", color: theme.subtext, fontSize: 22 }}>›</button>
+      </div>
+
+      {/* Legend */}
+      <div style={{ display: "flex", gap: 12, padding: "0 20px 16px", flexWrap: "wrap" }}>
+        {[
+          { color: COLORS.rose, label: "Period" },
+          { color: COLORS.sage, label: "Fertile" },
+          { color: COLORS.terra, label: "Ovulation" },
+          { color: COLORS.lavender, label: "PMS" },
+        ].map(({ color, label }) => (
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <div style={{ width: 10, height: 10, borderRadius: "50%", background: color }} />
+            <span style={{ color: theme.subtext, fontSize: 11 }}>{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Day labels */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", padding: "0 16px", marginBottom: 6 }}>
+        {["Su","Mo","Tu","We","Th","Fr","Sa"].map(d => (
+          <div key={d} style={{ textAlign: "center", color: theme.subtext, fontSize: 11, fontWeight: 600, letterSpacing: 0.5 }}>{d}</div>
+        ))}
+      </div>
+
+      {/* Days grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", padding: "0 16px", gap: 4 }}>
+        {Array(firstDay).fill(null).map((_, i) => <div key={`e${i}`} />)}
+        {Array(daysInMonth).fill(null).map((_, i) => {
+          const day = i + 1;
+          const color = getDayColor(day);
+          const hasDot = getJournalDot(day);
+          const isToday = new Date().getDate() === day && new Date().getMonth() === month && new Date().getFullYear() === year;
+          const isSel = selectedDay === day;
+          return (
+            <button key={day} onClick={() => setSelectedDay(isSel ? null : day)}
+              style={{
+                background: isSel ? `${COLORS.rose}30` : color ? `${color}25` : "transparent",
+                border: isToday ? `2px solid ${COLORS.rose}` : isSel ? `1.5px solid ${COLORS.rose}60` : "none",
+                borderRadius: 10, padding: "8px 0", cursor: "pointer", position: "relative",
+                display: "flex", flexDirection: "column", alignItems: "center"
+              }}>
+              <span style={{ color: color ? color : theme.text, fontSize: 14, fontWeight: isToday ? 700 : 400 }}>{day}</span>
+              {hasDot && <div style={{ width: 4, height: 4, borderRadius: "50%", background: COLORS.terra, marginTop: 2 }} />}
+              {color && !hasDot && <div style={{ width: 4, height: 4, borderRadius: "50%", background: color, marginTop: 2 }} />}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Selected day notes */}
+      {selectedDay && (
+        <div style={{ margin: "16px 16px 0", background: theme.cardBg, borderRadius: 16, padding: 16, border: `1px solid ${theme.border}` }}>
+          <p style={{ color: theme.text, fontSize: 14, fontWeight: 600, marginBottom: 8 }}>
+            {monthNames[month]} {selectedDay}
+          </p>
+          {selectedNotes.length === 0 ? (
+            <p style={{ color: theme.subtext, fontSize: 13 }}>No journal entries for this day.</p>
+          ) : selectedNotes.map(n => (
+            <div key={n.id} style={{ marginBottom: 8, borderLeft: `3px solid ${COLORS.rose}`, paddingLeft: 10 }}>
+              <p style={{ color: theme.subtext, fontSize: 11, marginBottom: 2 }}>Day {n.cycleDay} · {n.phase}</p>
+              <p style={{ color: theme.text, fontSize: 13, lineHeight: 1.5 }}>{n.content}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── PLAYBOOK SCREEN ─────────────────────────────────────────────────────────
+const SECTIONS = [
+  { id: "cycle", label: "Her Cycle", emoji: "🌙" },
+  { id: "comfort", label: "Comfort", emoji: "🤍" },
+  { id: "pain", label: "Pain", emoji: "💊" },
+  { id: "meds", label: "Meds", emoji: "🫙" },
+  { id: "moods", label: "Moods", emoji: "🌊" },
+  { id: "late", label: "Late", emoji: "⏳" },
+  { id: "log", label: "Monthly Log", emoji: "📓" },
+  { id: "wins", label: "My Wins", emoji: "✨" },
+  { id: "notes", label: "Notes", emoji: "📝" },
+  { id: "growth", label: "My Growth", emoji: "🌱" },
+];
+
+function PlaybookScreen({ theme, playbook, updatePlaybook }) {
+  const [activeSection, setActiveSection] = useState("cycle");
+
+  return (
+    <div style={{ paddingTop: 52 }}>
+      <div style={{ padding: "0 20px 12px" }}>
+        <p style={{ color: theme.subtext, fontSize: 11, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 4 }}>Her Playbook</p>
+        <h2 className="hh-serif" style={{ color: theme.text, fontSize: 28, fontWeight: 500 }}>Your Private Guide</h2>
+      </div>
+
+      {/* Section tabs */}
+      <div className="tab-scroll" style={{
+        display: "flex", overflowX: "auto", gap: 8,
+        padding: "0 16px 14px", scrollbarWidth: "none"
+      }}>
+        {SECTIONS.map(s => (
+          <button key={s.id} onClick={() => setActiveSection(s.id)}
+            style={{
+              background: activeSection === s.id ? COLORS.rose : theme.cardBg,
+              color: activeSection === s.id ? "#fff" : theme.subtext,
+              border: activeSection === s.id ? "none" : `1px solid ${theme.border}`,
+              borderRadius: 20, padding: "7px 14px", whiteSpace: "nowrap",
+              cursor: "pointer", fontSize: 13, fontWeight: 500, transition: "all 0.2s",
+              display: "flex", alignItems: "center", gap: 5,
+              fontFamily: "'DM Sans', sans-serif"
+            }}>
+            <span>{s.emoji}</span> {s.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Section content */}
+      <div key={activeSection} className="fade-in" style={{ padding: "0 16px" }}>
+        {activeSection === "cycle" && <SectionCycle theme={theme} playbook={playbook} update={updatePlaybook} />}
+        {activeSection === "comfort" && <SectionComfort theme={theme} playbook={playbook} update={updatePlaybook} />}
+        {activeSection === "pain" && <SectionPain theme={theme} playbook={playbook} update={updatePlaybook} />}
+        {activeSection === "meds" && <SectionMeds theme={theme} playbook={playbook} update={updatePlaybook} />}
+        {activeSection === "moods" && <SectionMoods theme={theme} playbook={playbook} update={updatePlaybook} />}
+        {activeSection === "late" && <SectionLate theme={theme} playbook={playbook} update={updatePlaybook} />}
+        {activeSection === "log" && <SectionLog theme={theme} playbook={playbook} update={updatePlaybook} />}
+        {activeSection === "wins" && <SectionWins theme={theme} playbook={playbook} update={updatePlaybook} />}
+        {activeSection === "notes" && <SectionNotes theme={theme} playbook={playbook} update={updatePlaybook} />}
+        {activeSection === "growth" && <SectionGrowth theme={theme} playbook={playbook} update={updatePlaybook} />}
+      </div>
+    </div>
+  );
+}
+
+// SECTION COMPONENTS
+function PbCard({ theme, title, children }) {
+  return (
+    <div style={{
+      background: theme.cardBg, borderRadius: 18, padding: "18px",
+      border: `1px solid ${theme.border}`, marginBottom: 12,
+      boxShadow: "0 2px 12px rgba(0,0,0,0.03)"
+    }}>
+      {title && <p style={{ color: COLORS.rose, fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 12 }}>{title}</p>}
+      {children}
+    </div>
+  );
+}
+
+function PbField({ theme, label, id, value, onChange, multiline, placeholder }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ color: theme.subtext, fontSize: 12, fontWeight: 600, letterSpacing: 0.5, display: "block", marginBottom: 6 }}>{label}</label>
+      <div style={{
+        background: theme.dark ? "#1E1614" : "#FAF3E0",
+        borderRadius: 10, padding: "10px 12px",
+        border: `1px solid ${theme.border}`,
+      }}>
+        {multiline ? (
+          <textarea
+            value={value || ""}
+            onChange={e => onChange(id, e.target.value)}
+            placeholder={placeholder || "Type here..."}
+            rows={3}
+            style={{ color: theme.text, fontSize: 14, lineHeight: 1.55, minHeight: 70 }}
+          />
+        ) : (
+          <input
+            type="text"
+            value={value || ""}
+            onChange={e => onChange(id, e.target.value)}
+            placeholder={placeholder || "Type here..."}
+            style={{ color: theme.text, fontSize: 14, height: 24 }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PbSelect({ theme, label, id, value, onChange, options }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ color: theme.subtext, fontSize: 12, fontWeight: 600, letterSpacing: 0.5, display: "block", marginBottom: 6 }}>{label}</label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {options.map(opt => (
+          <button key={opt} onClick={() => onChange(id, opt)}
+            style={{
+              background: value === opt ? COLORS.rose : "transparent",
+              color: value === opt ? "#fff" : theme.subtext,
+              border: `1.5px solid ${value === opt ? COLORS.rose : theme.border}`,
+              borderRadius: 20, padding: "6px 14px", fontSize: 13, cursor: "pointer",
+              fontFamily: "'DM Sans', sans-serif", transition: "all 0.18s"
+            }}>
+            {opt}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PainScale({ theme, value, onChange }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ color: theme.subtext, fontSize: 12, fontWeight: 600, letterSpacing: 0.5, display: "block", marginBottom: 8 }}>Pain Level (1–10)</label>
+      <div style={{ display: "flex", gap: 6 }}>
+        {Array(10).fill(null).map((_, i) => {
+          const v = i + 1;
+          const active = v <= (value || 0);
+          return (
+            <button key={v} onClick={() => onChange("painLevel", v)}
+              style={{
+                width: 30, height: 30, borderRadius: "50%",
+                background: active ? `linear-gradient(135deg, ${COLORS.rose}, ${COLORS.terra})` : "transparent",
+                border: `1.5px solid ${active ? COLORS.rose : theme.border}`,
+                color: active ? "#fff" : theme.subtext,
+                fontSize: 11, fontWeight: 600, cursor: "pointer",
+                fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s"
+              }}>
+              {v}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CheckList({ theme, label, id, options, value, onChange }) {
+  const selected = value || [];
+  const toggle = (opt) => {
+    const next = selected.includes(opt) ? selected.filter(x => x !== opt) : [...selected, opt];
+    onChange(id, next);
+  };
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={{ color: theme.subtext, fontSize: 12, fontWeight: 600, letterSpacing: 0.5, display: "block", marginBottom: 8 }}>{label}</label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {options.map(opt => {
+          const on = selected.includes(opt);
+          return (
+            <button key={opt} onClick={() => toggle(opt)}
+              style={{
+                background: on ? `${COLORS.rose}20` : "transparent",
+                color: on ? COLORS.rose : theme.subtext,
+                border: `1.5px solid ${on ? COLORS.rose : theme.border}`,
+                borderRadius: 8, padding: "6px 12px", fontSize: 12,
+                cursor: "pointer", fontFamily: "'DM Sans', sans-serif",
+                display: "flex", alignItems: "center", gap: 5, transition: "all 0.15s"
+              }}>
+              <span>{on ? "☑" : "☐"}</span> {opt}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SectionCycle({ theme, playbook, update }) {
+  const f = (id, val) => update(id, val);
+  return (
+    <PbCard theme={theme} title="🌙 About Her Cycle">
+      <PbField theme={theme} label="Average cycle length (days)" id="cycleLen" value={playbook.cycleLen} onChange={f} placeholder="e.g. 28" />
+      <PbField theme={theme} label="Period usually lasts (days)" id="periodLen" value={playbook.periodLen} onChange={f} placeholder="e.g. 5" />
+      <PbField theme={theme} label="Her most difficult days" id="hardDays" value={playbook.hardDays} onChange={f} placeholder="e.g. Day 1–3" />
+      <PbSelect theme={theme} label="Cycle regularity" id="regularity" value={playbook.regularity} onChange={f}
+        options={["Very Regular", "Fairly Regular", "Unpredictable"]} />
+      <PbField theme={theme} label="Patterns you've noticed" id="cycleNotes" value={playbook.cycleNotes} onChange={f} multiline placeholder="Anything you've observed..." />
+    </PbCard>
+  );
+}
+
+function SectionComfort({ theme, playbook, update }) {
+  const f = (id, val) => update(id, val);
+  return (
+    <PbCard theme={theme} title="🤍 Comfort & Care Guide">
+      <PbField theme={theme} label="What she likes during her period" id="comfortLikes" value={playbook.comfortLikes} onChange={f} multiline />
+      <PbField theme={theme} label="What she dislikes — never do this" id="comfortDislikes" value={playbook.comfortDislikes} onChange={f} multiline />
+      <PbField theme={theme} label="Her comfort foods" id="comfortFoods" value={playbook.comfortFoods} onChange={f} multiline />
+      <PbField theme={theme} label="Her comfort items (heating pad, show, blanket)" id="comfortItems" value={playbook.comfortItems} onChange={f} multiline />
+      <PbSelect theme={theme} label="Physical touch preference" id="touchPref" value={playbook.touchPref} onChange={f}
+        options={["Lots of Cuddles", "Some", "Give Her Space", "Depends"]} />
+      <PbField theme={theme} label="Her love language during this time" id="loveLang" value={playbook.loveLang} onChange={f} />
+      <PbField theme={theme} label="What makes her feel seen" id="feltSeen" value={playbook.feltSeen} onChange={f} multiline />
+    </PbCard>
+  );
+}
+
+function SectionPain({ theme, playbook, update }) {
+  const f = (id, val) => update(id, val);
+  return (
+    <PbCard theme={theme} title="💊 Pain & Symptoms">
+      <PainScale theme={theme} value={playbook.painLevel} onChange={f} />
+      <CheckList theme={theme} label="Where she feels pain" id="painAreas" value={playbook.painAreas} onChange={f}
+        options={["Cramps","Lower Back","Headache","Bloating","Breast Tenderness","Nausea","Other"]} />
+      <PbField theme={theme} label="Pain usually peaks on" id="painPeak" value={playbook.painPeak} onChange={f} placeholder="e.g. Day 1–2" />
+      <PbField theme={theme} label="Pain usually improves by" id="painEnd" value={playbook.painEnd} onChange={f} placeholder="e.g. Day 3" />
+      <PbField theme={theme} label="Known conditions (PCOS, endometriosis, etc.)" id="conditions" value={playbook.conditions} onChange={f} />
+      <PbField theme={theme} label="How pain affects her daily life" id="painImpact" value={playbook.painImpact} onChange={f} multiline />
+      <PbField theme={theme} label="What visibly helps" id="painHelps" value={playbook.painHelps} onChange={f} multiline />
+      <PbField theme={theme} label="What makes it worse" id="painWorse" value={playbook.painWorse} onChange={f} multiline />
+    </PbCard>
+  );
+}
+
+function SectionMeds({ theme, playbook, update }) {
+  const rows = playbook.medsRows || [{ id: 1, med: "", dose: "", when: "", helps: "" }];
+  const setRows = (r) => update("medsRows", r);
+  const addRow = () => setRows([...rows, { id: Date.now(), med: "", dose: "", when: "", helps: "" }]);
+  const delRow = (id) => setRows(rows.filter(r => r.id !== id));
+  const editRow = (id, field, val) => setRows(rows.map(r => r.id === id ? { ...r, [field]: val } : r));
+
+  return (
+    <div>
+      <PbCard theme={theme} title="🫙 Medications & Remedies">
+        {rows.map((r, i) => (
+          <div key={r.id} style={{
+            background: theme.dark ? "#1E1614" : "#FAF3E0",
+            borderRadius: 12, padding: "12px", marginBottom: 10, border: `1px solid ${theme.border}`
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ color: theme.subtext, fontSize: 11, fontWeight: 600 }}>Entry {i + 1}</span>
+              <button onClick={() => delRow(r.id)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.rose, fontSize: 12 }}>Remove</button>
+            </div>
+            {[
+              { field: "med", label: "Medication / Remedy" },
+              { field: "dose", label: "Dose" },
+              { field: "when", label: "When to offer" },
+              { field: "helps", label: "Does it help?" },
+            ].map(({ field, label }) => (
+              <div key={field} style={{ marginBottom: 8 }}>
+                <label style={{ color: theme.subtext, fontSize: 11, display: "block", marginBottom: 3 }}>{label}</label>
+                <input value={r[field]} onChange={e => editRow(r.id, field, e.target.value)}
+                  style={{ color: theme.text, fontSize: 13, background: "none", border: "none", borderBottom: `1px solid ${theme.border}`, paddingBottom: 4, width: "100%" }} />
+              </div>
+            ))}
+          </div>
+        ))}
+        <button onClick={addRow} style={{
+          background: "transparent", border: `1.5px dashed ${COLORS.rose}50`,
+          color: COLORS.rose, borderRadius: 10, padding: "10px", width: "100%",
+          cursor: "pointer", fontSize: 13, fontFamily: "'DM Sans', sans-serif"
+        }}>+ Add Remedy</button>
+      </PbCard>
+      <PbCard theme={theme}>
+        <PbField theme={theme} label="Natural remedies that work" id="naturalRemedies" value={playbook.naturalRemedies} onChange={(id, val) => update(id, val)} multiline />
+        <PbField theme={theme} label="Remedies that DON'T work" id="badRemedies" value={playbook.badRemedies} onChange={(id, val) => update(id, val)} multiline />
+        <PbField theme={theme} label="Her preferred tea or drink" id="prefDrink" value={playbook.prefDrink} onChange={(id, val) => update(id, val)} />
+      </PbCard>
+    </div>
+  );
+}
+
+function SectionMoods({ theme, playbook, update }) {
+  const f = (id, val) => update(id, val);
+  return (
+    <PbCard theme={theme} title="🌊 Her Emotional Landscape">
+      <PbField theme={theme} label="How her mood shifts before her period" id="moodShifts" value={playbook.moodShifts} onChange={f} multiline />
+      <PbField theme={theme} label="Her biggest triggers this time" id="triggers" value={playbook.triggers} onChange={f} multiline />
+      <PbField theme={theme} label="What calms her when upset" id="calmsHer" value={playbook.calmsHer} onChange={f} multiline />
+      <PbField theme={theme} label="What she needs but won't ask for" id="wonAsk" value={playbook.wonAsk} onChange={f} multiline />
+      <PbField theme={theme} label="Best thing to say when she's struggling" id="bestWords" value={playbook.bestWords} onChange={f} multiline />
+      <PbField theme={theme} label="Never say this" id="neverSay" value={playbook.neverSay} onChange={f} multiline />
+      <PbSelect theme={theme} label="How she prefers to be checked on" id="checkInPref" value={playbook.checkInPref} onChange={f}
+        options={["Text", "In Person", "Leave Her Alone", "Just Be Present"]} />
+    </PbCard>
+  );
+}
+
+function SectionLate({ theme, playbook, update }) {
+  const rows = playbook.lateRows || [];
+  const setRows = (r) => update("lateRows", r);
+  const addRow = () => setRows([...rows, { id: Date.now(), cycle: "", expected: "", actual: "", daysLate: "", reason: "" }]);
+  const delRow = (id) => setRows(rows.filter(r => r.id !== id));
+  const editRow = (id, field, val) => setRows(rows.map(r => r.id === id ? { ...r, [field]: val } : r));
+
+  const avgLate = rows.filter(r => r.daysLate > 0).length
+    ? (rows.filter(r => r.daysLate > 0).reduce((a, r) => a + Number(r.daysLate || 0), 0) / rows.filter(r => r.daysLate > 0).length).toFixed(1)
+    : "--";
+
+  return (
+    <div>
+      <div style={{ background: `${COLORS.sage}18`, border: `1px solid ${COLORS.sage}40`, borderRadius: 16, padding: "14px 16px", marginBottom: 12 }}>
+        <p style={{ color: COLORS.sage, fontWeight: 600, fontSize: 13, marginBottom: 4 }}>Stay calm. Periods can be late for many reasons.</p>
+        <p style={{ color: theme.subtext, fontSize: 13, lineHeight: 1.5 }}>
+          Stress, travel, diet, illness — all can shift her cycle. Track cycles here so you have context, not panic.
+        </p>
+      </div>
+
+      <PbCard theme={theme} title="⏳ Late Period Tracker">
+        {rows.length === 0 && (
+          <p style={{ color: theme.subtext, fontSize: 13, marginBottom: 12 }}>No cycles tracked yet. Start below.</p>
+        )}
+        {rows.map((r, i) => (
+          <div key={r.id} style={{
+            background: theme.dark ? "#1E1614" : "#FAF3E0",
+            borderRadius: 12, padding: 12, marginBottom: 10, border: `1px solid ${theme.border}`
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ color: theme.subtext, fontSize: 11, fontWeight: 600 }}>Cycle {i + 1}</span>
+              <button onClick={() => delRow(r.id)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.rose, fontSize: 12 }}>Remove</button>
+            </div>
+            {[
+              { field: "expected", label: "Expected Date" },
+              { field: "actual", label: "Actual Start Date" },
+              { field: "daysLate", label: "Days Late" },
+              { field: "reason", label: "Possible Reason" },
+            ].map(({ field, label }) => (
+              <div key={field} style={{ marginBottom: 8 }}>
+                <label style={{ color: theme.subtext, fontSize: 11, display: "block", marginBottom: 3 }}>{label}</label>
+                <input value={r[field]} onChange={e => editRow(r.id, field, e.target.value)}
+                  style={{ color: theme.text, fontSize: 13, background: "none", border: "none", borderBottom: `1px solid ${theme.border}`, paddingBottom: 4, width: "100%" }} />
+              </div>
+            ))}
+          </div>
+        ))}
+        <button onClick={addRow} style={{
+          background: "transparent", border: `1.5px dashed ${COLORS.rose}50`,
+          color: COLORS.rose, borderRadius: 10, padding: "10px", width: "100%",
+          cursor: "pointer", fontSize: 13, fontFamily: "'DM Sans', sans-serif"
+        }}>+ Add Cycle Entry</button>
+
+        {rows.length > 0 && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${theme.border}` }}>
+            <p style={{ color: theme.subtext, fontSize: 12, fontWeight: 600, marginBottom: 6 }}>SUMMARY</p>
+            <p style={{ color: theme.text, fontSize: 13 }}>Average lateness: <strong>{avgLate} days</strong></p>
+            <p style={{ color: theme.text, fontSize: 13 }}>Times tracked: <strong>{rows.length}</strong></p>
+          </div>
+        )}
+      </PbCard>
+
+      {rows.length > 0 && (
+        <div style={{ background: `${COLORS.rose}15`, border: `1px solid ${COLORS.rose}30`, borderRadius: 16, padding: "14px 16px" }}>
+          <p style={{ color: COLORS.rose, fontWeight: 600, fontSize: 13, marginBottom: 4 }}>Remember</p>
+          <p style={{ color: theme.subtext, fontSize: 13, lineHeight: 1.5 }}>
+            She's been late before. Check her history above before worrying. Her pattern is your guide.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SectionLog({ theme, playbook, update }) {
+  const logs = playbook.monthlyLogs || Array(6).fill(null).map((_, i) => ({ id: i + 1, month: "", start: "", end: "", late: "", pain: "", mood: "", helped: "", wish: "", learned: "" }));
+  const setLogs = (l) => update("monthlyLogs", l);
+  const edit = (id, field, val) => setLogs(logs.map(l => l.id === id ? { ...l, [field]: val } : l));
+
+  return (
+    <div>
+      {logs.map((log, i) => (
+        <PbCard key={log.id} theme={theme} title={`📓 Cycle ${i + 1}`}>
+          <PbField theme={theme} label="Month" id="month" value={log.month} onChange={(_, v) => edit(log.id, "month", v)} />
+          <PbField theme={theme} label="Period start date" id="start" value={log.start} onChange={(_, v) => edit(log.id, "start", v)} />
+          <PbField theme={theme} label="Period end date" id="end" value={log.end} onChange={(_, v) => edit(log.id, "end", v)} />
+          <PbField theme={theme} label="Days late (if any)" id="late" value={log.late} onChange={(_, v) => edit(log.id, "late", v)} />
+          <PbField theme={theme} label="Pain level this cycle (1–10)" id="pain" value={log.pain} onChange={(_, v) => edit(log.id, "pain", v)} />
+          <PbField theme={theme} label="Her overall mood" id="mood" value={log.mood} onChange={(_, v) => edit(log.id, "mood", v)} />
+          <PbField theme={theme} label="What I did that helped" id="helped" value={log.helped} onChange={(_, v) => edit(log.id, "helped", v)} multiline />
+          <PbField theme={theme} label="What I wish I'd done differently" id="wish" value={log.wish} onChange={(_, v) => edit(log.id, "wish", v)} multiline />
+          <PbField theme={theme} label="One thing I learned about her" id="learned" value={log.learned} onChange={(_, v) => edit(log.id, "learned", v)} multiline />
+        </PbCard>
+      ))}
+    </div>
+  );
+}
+
+function SectionWins({ theme, playbook, update }) {
+  const wins = playbook.wins || [];
+  const setWins = (w) => update("wins", w);
+  const addWin = () => setWins([...wins, { id: Date.now(), date: "", what: "", reaction: "" }]);
+  const del = (id) => setWins(wins.filter(w => w.id !== id));
+  const edit = (id, field, val) => setWins(wins.map(w => w.id === id ? { ...w, [field]: val } : w));
+
+  return (
+    <div>
+      <div style={{ background: `${COLORS.terra}15`, border: `1px solid ${COLORS.terra}40`, borderRadius: 16, padding: "14px 16px", marginBottom: 12 }}>
+        <p style={{ color: COLORS.terra, fontWeight: 600, fontSize: 13, marginBottom: 4 }}>✨ Remember This</p>
+        <p style={{ color: theme.subtext, fontSize: 13, lineHeight: 1.5 }}>
+          Every time something works — write it down. This becomes your most valuable reference.
+        </p>
+      </div>
+
+      {wins.length === 0 && (
+        <div style={{ textAlign: "center", padding: "30px 20px", color: theme.subtext, fontSize: 13, lineHeight: 1.6 }}>
+          No wins logged yet. Next time something works — come back and write it down.
+        </div>
+      )}
+
+      {wins.map((w, i) => (
+        <PbCard key={w.id} theme={theme}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ color: COLORS.terra, fontSize: 11, fontWeight: 700 }}>WIN #{i + 1}</span>
+            <button onClick={() => del(w.id)} style={{ background: "none", border: "none", cursor: "pointer", color: COLORS.rose, fontSize: 12 }}>Remove</button>
+          </div>
+          {[{ field: "date", label: "Date" }, { field: "what", label: "What I Did" }, { field: "reaction", label: "Her Reaction" }].map(({ field, label }) => (
+            <PbField key={field} theme={theme} label={label} id={field} value={w[field]} onChange={(_, v) => edit(w.id, field, v)} multiline={field !== "date"} />
+          ))}
+        </PbCard>
+      ))}
+
+      <button onClick={addWin} style={{
+        background: COLORS.terra, color: "#fff",
+        border: "none", borderRadius: 14, padding: "14px", width: "100%",
+        cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+        marginBottom: 12
+      }}>+ Log a Win</button>
+    </div>
+  );
+}
+
+function SectionNotes({ theme, playbook, update }) {
+  return (
+    <PbCard theme={theme} title="📝 Open Notes">
+      <p style={{ color: theme.subtext, fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+        Anything that doesn't fit elsewhere — observations, patterns, things you noticed.
+      </p>
+      <div style={{
+        background: theme.dark ? "#1E1614" : "#FAF3E0",
+        borderRadius: 12, padding: "14px", border: `1px solid ${theme.border}`
+      }}>
+        <textarea
+          value={playbook.openNotes || ""}
+          onChange={e => update("openNotes", e.target.value)}
+          placeholder="Your private notes go here..."
+          rows={14}
+          style={{ color: theme.text, fontSize: 14, lineHeight: 1.7, background: "none", border: "none", width: "100%", resize: "none" }}
+        />
+      </div>
+    </PbCard>
+  );
+}
+
+function SectionGrowth({ theme, playbook, update }) {
+  const growths = playbook.growths || Array(6).fill(null).map((_, i) => ({ id: i + 1, better: "", improve: "", appreciated: "", next: "" }));
+  const setGrowths = (g) => update("growths", g);
+  const edit = (id, field, val) => setGrowths(growths.map(g => g.id === id ? { ...g, [field]: val } : g));
+
+  return (
+    <div>
+      {growths.map((g, i) => (
+        <PbCard key={g.id} theme={theme} title={`🌱 Month ${i + 1}`}>
+          <PbField theme={theme} label="This month I did better at" id="better" value={g.better} onChange={(_, v) => edit(g.id, "better", v)} multiline />
+          <PbField theme={theme} label="I still want to improve" id="improve" value={g.improve} onChange={(_, v) => edit(g.id, "improve", v)} multiline />
+          <PbField theme={theme} label="She told me she appreciated" id="appreciated" value={g.appreciated} onChange={(_, v) => edit(g.id, "appreciated", v)} multiline />
+          <PbField theme={theme} label="Next cycle I will" id="next" value={g.next} onChange={(_, v) => edit(g.id, "next", v)} multiline />
+        </PbCard>
+      ))}
+    </div>
+  );
+}
+
+// ─── JOURNAL SCREEN ──────────────────────────────────────────────────────────
+function JournalScreen({ theme, journal, setJournal, cycleDay, phase }) {
+  const [content, setContent] = useState("");
+  const [moods, setMoods] = useState([]);
+  const [saved, setSaved] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const toggleMood = (m) => setMoods(ms => ms.includes(m) ? ms.filter(x => x !== m) : [...ms, m]);
+
+  const handleSave = () => {
+    if (!content.trim()) return;
+    const entry = {
+      id: Date.now(),
+      date: new Date().toISOString(),
+      cycleDay,
+      phase: phase?.name,
+      moods,
+      content,
+    };
+    setJournal([entry, ...journal]);
+    setContent(""); setMoods([]); setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const deleteEntry = (id) => setJournal(journal.filter(e => e.id !== id));
+
+  const filtered = search ? journal.filter(e => e.content.toLowerCase().includes(search.toLowerCase())) : journal;
+
+  return (
+    <div style={{ padding: "52px 16px 8px" }}>
+      <p style={{ color: theme.subtext, fontSize: 11, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 4 }}>Daily Journal</p>
+      <h2 className="hh-serif" style={{ color: theme.text, fontSize: 28, fontWeight: 500, marginBottom: 20 }}>What You Noticed</h2>
+
+      {/* Compose area */}
+      <div style={{ background: theme.cardBg, borderRadius: 18, padding: 18, border: `1px solid ${theme.border}`, marginBottom: 16, boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}>
+        {cycleDay && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <span style={{ background: `${COLORS.rose}20`, color: COLORS.rose, fontSize: 11, fontWeight: 600, borderRadius: 20, padding: "3px 10px" }}>Day {cycleDay}</span>
+            {phase && <span style={{ background: `${phase.color}20`, color: phase.color, fontSize: 11, fontWeight: 600, borderRadius: 20, padding: "3px 10px" }}>{phase.name}</span>}
+          </div>
+        )}
+        <textarea
+          value={content}
+          onChange={e => setContent(e.target.value)}
+          placeholder="What did you notice today? What worked? What do you want to remember?"
+          rows={5}
+          autoFocus
+          style={{
+            color: theme.text, fontSize: 15, lineHeight: 1.65,
+            background: "none", border: "none", width: "100%", resize: "none",
+            fontFamily: "'DM Sans', sans-serif"
+          }}
+        />
+
+        {/* Mood tags */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${theme.border}` }}>
+          {MOOD_TAGS.map(m => {
+            const on = moods.includes(m);
+            return (
+              <button key={m} onClick={() => toggleMood(m)}
+                style={{
+                  background: on ? `${MOOD_COLORS[m]}25` : "transparent",
+                  color: on ? MOOD_COLORS[m] : theme.subtext,
+                  border: `1.5px solid ${on ? MOOD_COLORS[m] : theme.border}`,
+                  borderRadius: 20, padding: "5px 11px", fontSize: 12,
+                  cursor: "pointer", fontFamily: "'DM Sans', sans-serif", transition: "all 0.15s"
+                }}>
+                {m}
+              </button>
+            );
+          })}
+        </div>
+
+        <button onClick={handleSave}
+          style={{
+            background: `linear-gradient(135deg, ${COLORS.rose}, ${COLORS.terra})`,
+            color: "#fff", border: "none", borderRadius: 12, padding: "12px",
+            width: "100%", marginTop: 14, cursor: "pointer", fontSize: 14, fontWeight: 600,
+            fontFamily: "'DM Sans', sans-serif", transition: "opacity 0.2s",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 8
+          }}>
+          {saved ? <span className="check-pop">✓ Saved</span> : "Save Entry"}
+        </button>
+      </div>
+
+      {/* Search */}
+      <div style={{
+        background: theme.cardBg, borderRadius: 12, padding: "10px 14px",
+        border: `1px solid ${theme.border}`, display: "flex", alignItems: "center", gap: 8, marginBottom: 16
+      }}>
+        <span style={{ color: theme.subtext }}>🔍</span>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Search entries..."
+          style={{ color: theme.text, fontSize: 14, flex: 1, background: "none", border: "none" }} />
+      </div>
+
+      {/* Feed */}
+      {filtered.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "40px 20px", color: theme.subtext, fontSize: 14, lineHeight: 1.7 }}>
+          {journal.length === 0
+            ? "Nothing here yet. The first note you write is the beginning of knowing her better."
+            : "No entries match your search."}
+        </div>
+      ) : filtered.map(e => (
+        <div key={e.id} style={{
+          background: theme.cardBg, borderRadius: 16, padding: 16,
+          border: `1px solid ${theme.border}`, marginBottom: 10,
+          boxShadow: "0 1px 8px rgba(0,0,0,0.03)"
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ color: theme.subtext, fontSize: 11 }}>{new Date(e.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+              {e.cycleDay && <span style={{ color: COLORS.rose, fontSize: 11 }}>Day {e.cycleDay}</span>}
+              {e.phase && <span style={{ color: theme.subtext, fontSize: 11 }}>· {e.phase}</span>}
+            </div>
+            <button onClick={() => deleteEntry(e.id)} style={{ background: "none", border: "none", cursor: "pointer", color: theme.subtext, fontSize: 16 }}>×</button>
+          </div>
+          {e.moods && e.moods.length > 0 && (
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+              {e.moods.map(m => (
+                <span key={m} style={{ background: `${MOOD_COLORS[m]}20`, color: MOOD_COLORS[m], fontSize: 10, fontWeight: 600, borderRadius: 20, padding: "2px 8px" }}>{m}</span>
+              ))}
+            </div>
+          )}
+          <p style={{ color: theme.text, fontSize: 14, lineHeight: 1.6 }}>{e.content}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── SETTINGS SCREEN ─────────────────────────────────────────────────────────
+function SettingsScreen({ theme, settings, updateSettings, dark, setDark, pin, setPin, cycleLogs, setCycleLogs }) {
+  const [showClear, setShowClear] = useState(false);
+  const [newPin, setNewPin] = useState("");
+
+  return (
+    <div style={{ padding: "52px 16px 8px" }}>
+      <p style={{ color: theme.subtext, fontSize: 11, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 4 }}>Settings</p>
+      <h2 className="hh-serif" style={{ color: theme.text, fontSize: 28, fontWeight: 500, marginBottom: 20 }}>Your Setup</h2>
+
+      {/* Her Info */}
+      <SCard theme={theme} title="Her Info">
+        <SRow theme={theme} label="Her name">
+          <input value={settings.name} onChange={e => updateSettings({ name: e.target.value })}
+            placeholder="Her first name (optional)"
+            style={{ color: theme.text, fontSize: 14, background: "none", border: "none", textAlign: "right", fontFamily: "'DM Sans',sans-serif" }} />
+        </SRow>
+        <SRow theme={theme} label="Average cycle length">
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="number" value={settings.cycleLen} onChange={e => updateSettings({ cycleLen: Number(e.target.value) })}
+              style={{ color: theme.text, fontSize: 14, background: "none", border: "none", textAlign: "right", width: 40, fontFamily: "'DM Sans',sans-serif" }} />
+            <span style={{ color: theme.subtext, fontSize: 13 }}>days</span>
+          </div>
+        </SRow>
+        <SRow theme={theme} label="Period duration">
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="number" value={settings.periodLen} onChange={e => updateSettings({ periodLen: Number(e.target.value) })}
+              style={{ color: theme.text, fontSize: 14, background: "none", border: "none", textAlign: "right", width: 40, fontFamily: "'DM Sans',sans-serif" }} />
+            <span style={{ color: theme.subtext, fontSize: 13 }}>days</span>
+          </div>
+        </SRow>
+        <SRow theme={theme} label="Last period start">
+          <input type="date" value={settings.lastStart} onChange={e => updateSettings({ lastStart: e.target.value })}
+            style={{ color: theme.text, fontSize: 13, background: "none", border: "none", fontFamily: "'DM Sans',sans-serif" }} />
+        </SRow>
+      </SCard>
+
+      {/* Appearance */}
+      <SCard theme={theme} title="Appearance">
+        <SRow theme={theme} label="Dark mode">
+          <Toggle value={dark} onChange={setDark} />
+        </SRow>
+      </SCard>
+
+      {/* Privacy */}
+      <SCard theme={theme} title="Privacy">
+        <div style={{ background: `${COLORS.sage}18`, borderRadius: 12, padding: "12px 14px", marginBottom: 12 }}>
+          <p style={{ color: theme.text, fontSize: 13, lineHeight: 1.55 }}>
+            🔒 All your data is stored only on this device. Nothing is sent to any server. Nothing is shared. Ever.
+          </p>
+        </div>
+        <SRow theme={theme} label="App PIN">
+          <input type="password" value={newPin} onChange={e => { setNewPin(e.target.value); if (e.target.value.length === 4) { setPin(e.target.value); save("hh-pin", e.target.value); } }}
+            placeholder={pin ? "Change PIN" : "Set 4-digit PIN"}
+            maxLength={4}
+            style={{ color: theme.text, fontSize: 14, background: "none", border: "none", textAlign: "right", width: 90, fontFamily: "'DM Sans',sans-serif", letterSpacing: 4 }} />
+        </SRow>
+      </SCard>
+
+      {/* Danger */}
+      <SCard theme={theme} title="Data">
+        {showClear ? (
+          <div>
+            <p style={{ color: theme.text, fontSize: 14, lineHeight: 1.5, marginBottom: 14 }}>
+              This will permanently delete all your data. This cannot be undone.
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setShowClear(false)}
+                style={{ flex: 1, background: theme.dark ? "#3D2A26" : "#F0E4D8", color: theme.text, border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontSize: 14, fontFamily: "'DM Sans',sans-serif" }}>
+                Cancel
+              </button>
+              <button onClick={() => { localStorage.clear(); window.location.reload(); }}
+                style={{ flex: 1, background: COLORS.rose, color: "#fff", border: "none", borderRadius: 10, padding: "12px", cursor: "pointer", fontSize: 14, fontWeight: 600, fontFamily: "'DM Sans',sans-serif" }}>
+                Delete All
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setShowClear(true)}
+            style={{ background: "none", border: `1.5px solid ${COLORS.rose}50`, color: COLORS.rose, borderRadius: 10, padding: "12px", width: "100%", cursor: "pointer", fontSize: 14, fontFamily: "'DM Sans',sans-serif" }}>
+            Clear All Data
+          </button>
+        )}
+      </SCard>
+
+      <p className="hh-serif" style={{ color: theme.subtext, fontSize: 12, textAlign: "center", marginTop: 20, fontStyle: "italic", lineHeight: 1.6 }}>
+        Her Handbook — Because the little things you notice become the patterns you'll understand.
+      </p>
+    </div>
+  );
+}
+
+function SCard({ theme, title, children }) {
+  return (
+    <div style={{ background: theme.cardBg, borderRadius: 18, border: `1px solid ${theme.border}`, marginBottom: 14, overflow: "hidden", boxShadow: "0 2px 12px rgba(0,0,0,0.03)" }}>
+      <div style={{ padding: "12px 16px", borderBottom: `1px solid ${theme.border}` }}>
+        <p style={{ color: theme.subtext, fontSize: 11, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase" }}>{title}</p>
+      </div>
+      <div style={{ padding: "4px 0" }}>{children}</div>
+    </div>
+  );
+}
+
+function SRow({ theme, label, children }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", borderBottom: `1px solid ${theme.border}` }}>
+      <span style={{ color: theme.text, fontSize: 14 }}>{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function Toggle({ value, onChange }) {
+  return (
+    <button onClick={() => onChange(!value)}
+      style={{
+        width: 46, height: 26, borderRadius: 13,
+        background: value ? COLORS.rose : "#CCC",
+        border: "none", cursor: "pointer", position: "relative",
+        transition: "background 0.25s"
+      }}>
+      <div style={{
+        width: 20, height: 20, borderRadius: "50%", background: "#fff",
+        position: "absolute", top: 3, left: value ? 23 : 3,
+        transition: "left 0.25s", boxShadow: "0 1px 4px rgba(0,0,0,0.2)"
+      }} />
+    </button>
+  );
+}
+
+// ─── ONBOARDING ──────────────────────────────────────────────────────────────
+function Onboarding({ theme, onComplete }) {
+  const [step, setStep] = useState(0);
+  const [data, setData] = useState({ name: "", cycleLen: 28, periodLen: 5, lastStart: "" });
+  const [pinEntry, setPinEntry] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+
+  const steps = [
+    // Welcome
+    <div key="welcome" className="slide-up" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", padding: "40px 32px" }}>
+      <div style={{ marginBottom: 40 }}>
+        <div style={{ fontSize: 48, marginBottom: 20 }}>📖</div>
+        <h1 className="hh-serif" style={{ color: theme.text, fontSize: 40, fontWeight: 500, lineHeight: 1.15, marginBottom: 16 }}>
+          Welcome to<br />Her Handbook.
+        </h1>
+        <p style={{ color: theme.subtext, fontSize: 16, lineHeight: 1.7 }}>
+          This is your private space to learn her — what she needs, what works, what to never do.
+        </p>
+        <p style={{ color: theme.subtext, fontSize: 16, lineHeight: 1.7, marginTop: 12 }}>
+          Let's set it up so you're ready when she needs you most.
+        </p>
+      </div>
+      <button onClick={() => setStep(1)} style={btnStyle}>Get Started →</button>
+    </div>,
+
+    // Her cycle
+    <div key="cycle" className="slide-up" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", padding: "40px 32px" }}>
+      <h2 className="hh-serif" style={{ color: theme.text, fontSize: 32, fontWeight: 500, marginBottom: 8 }}>Her Cycle</h2>
+      <p style={{ color: theme.subtext, fontSize: 14, marginBottom: 32 }}>Just the basics — you can update this anytime.</p>
+
+      {[
+        { label: "When did her last period start?", field: "lastStart", type: "date" },
+        { label: "Her average cycle length (days)", field: "cycleLen", type: "number" },
+        { label: "How long does her period usually last?", field: "periodLen", type: "number" },
+      ].map(({ label, field, type }) => (
+        <div key={field} style={{ marginBottom: 18 }}>
+          <label style={{ color: theme.text, fontSize: 14, fontWeight: 500, display: "block", marginBottom: 8 }}>{label}</label>
+          <div style={{
+            background: theme.cardBg, borderRadius: 12, padding: "14px 16px",
+            border: `1.5px solid ${theme.border}`, transition: "border-color 0.2s"
+          }}>
+            <input type={type} value={data[field]}
+              onChange={e => setData(d => ({ ...d, [field]: type === "number" ? Number(e.target.value) : e.target.value }))}
+              style={{ color: theme.text, fontSize: 16, background: "none", border: "none", width: "100%", fontFamily: "'DM Sans',sans-serif" }} />
+          </div>
+        </div>
+      ))}
+      <button onClick={() => setStep(2)} style={{ ...btnStyle, marginTop: 8 }}>Continue →</button>
+    </div>,
+
+    // PIN
+    <div key="pin" className="slide-up" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", padding: "40px 32px" }}>
+      <h2 className="hh-serif" style={{ color: theme.text, fontSize: 32, fontWeight: 500, marginBottom: 8 }}>Privacy Lock</h2>
+      <p style={{ color: theme.subtext, fontSize: 14, lineHeight: 1.6, marginBottom: 28 }}>
+        Set a 4-digit PIN to keep this private. You can skip this and set it later in Settings.
+      </p>
+      {[
+        { label: "Choose a 4-digit PIN", val: pinEntry, set: setPinEntry },
+        { label: "Confirm PIN", val: confirmPin, set: setConfirmPin },
+      ].map(({ label, val, set }) => (
+        <div key={label} style={{ marginBottom: 16 }}>
+          <label style={{ color: theme.text, fontSize: 14, fontWeight: 500, display: "block", marginBottom: 8 }}>{label}</label>
+          <div style={{ background: theme.cardBg, borderRadius: 12, padding: "14px 16px", border: `1.5px solid ${theme.border}` }}>
+            <input type="password" maxLength={4} value={val} onChange={e => set(e.target.value)}
+              placeholder="••••"
+              style={{ color: theme.text, fontSize: 20, letterSpacing: 8, background: "none", border: "none", width: "100%", fontFamily: "'DM Sans',sans-serif" }} />
+          </div>
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+        <button onClick={() => onComplete(data, null)}
+          style={{ flex: 1, background: "none", border: `1.5px solid ${theme.border}`, color: theme.subtext, borderRadius: 14, padding: "14px", cursor: "pointer", fontSize: 14, fontFamily: "'DM Sans',sans-serif" }}>
+          Skip
+        </button>
+        <button onClick={() => {
+          if (pinEntry.length === 4 && pinEntry === confirmPin) onComplete(data, pinEntry);
+        }}
+          style={{ ...btnStyle, flex: 2 }}>
+          Set PIN & Finish
+        </button>
+      </div>
+    </div>,
+  ];
+
+  return steps[step];
+}
+
+const btnStyle = {
+  background: `linear-gradient(135deg, ${COLORS.rose}, ${COLORS.terra})`,
+  color: "#fff", border: "none", borderRadius: 14, padding: "16px",
+  width: "100%", cursor: "pointer", fontSize: 16, fontWeight: 600,
+  fontFamily: "'DM Sans', sans-serif", letterSpacing: 0.3,
+};
+
+// ─── LOCK SCREEN ─────────────────────────────────────────────────────────────
+function LockScreen({ theme, pin, onUnlock }) {
+  const [entered, setEntered] = useState("");
+  const [wrong, setWrong] = useState(false);
+
+  const handleDigit = (d) => {
+    const next = entered + d;
+    setEntered(next);
+    if (next.length === 4) {
+      if (next === pin) { onUnlock(); }
+      else { setWrong(true); setTimeout(() => { setEntered(""); setWrong(false); }, 600); }
+    }
+  };
+
+  const digits = [[1,2,3],[4,5,6],[7,8,9],["",0,"⌫"]];
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32 }}>
+      <div style={{ fontSize: 48, marginBottom: 16 }}>📖</div>
+      <h2 className="hh-serif" style={{ color: theme.text, fontSize: 28, fontWeight: 500, marginBottom: 32 }}>Her Handbook</h2>
+
+      {/* Dots */}
+      <div className={wrong ? "shake" : ""} style={{ display: "flex", gap: 16, marginBottom: 40 }}>
+        {[0,1,2,3].map(i => (
+          <div key={i} style={{
+            width: 16, height: 16, borderRadius: "50%",
+            background: i < entered.length ? COLORS.rose : "transparent",
+            border: `2px solid ${wrong ? COLORS.rose : theme.border}`,
+            transition: "background 0.15s"
+          }} />
+        ))}
+      </div>
+
+      {/* Pad */}
+      {digits.map((row, ri) => (
+        <div key={ri} style={{ display: "flex", gap: 20, marginBottom: 16 }}>
+          {row.map(d => (
+            <button key={d} onClick={() => {
+              if (d === "⌫") setEntered(e => e.slice(0, -1));
+              else if (d !== "") handleDigit(String(d));
+            }}
+              style={{
+                width: 72, height: 72, borderRadius: "50%",
+                background: d === "" ? "transparent" : theme.cardBg,
+                border: d === "" ? "none" : `1.5px solid ${theme.border}`,
+                color: theme.text, fontSize: 22, cursor: d === "" ? "default" : "pointer",
+                fontFamily: "'DM Sans', sans-serif", fontWeight: 400,
+                boxShadow: d === "" ? "none" : "0 2px 8px rgba(0,0,0,0.06)"
+              }}>
+              {d}
+            </button>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── ICONS ───────────────────────────────────────────────────────────────────
+function HomeIcon({ size, active }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={active ? COLORS.rose : "none"} stroke="currentColor" strokeWidth="1.8">
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </svg>
+  );
+}
+function CalIcon({ size, active }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" fill={active ? `${COLORS.rose}20` : "none"} />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+  );
+}
+function BookIcon({ size, active }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={active ? `${COLORS.rose}15` : "none"} stroke="currentColor" strokeWidth="1.8">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </svg>
+  );
+}
+function PenIcon({ size, active }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <line x1="12" y1="20" x2="12" y2="10" />
+      <path d="M18 20H6" />
+      <path d="M12 10 L16 4 L20 10" fill={active ? `${COLORS.rose}20` : "none"} />
+    </svg>
+  );
+}
+function GearIcon({ size, active }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="12" cy="12" r="3" fill={active ? `${COLORS.rose}30` : "none"} />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<HerHandbook />);
+  </script>
+</body>
+</html>
